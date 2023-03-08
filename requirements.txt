@@ -1,0 +1,7 @@
+numpy
+scipy
+astropy
+alive-progress
+Bottleneck
+Pillow
+matplotlib
