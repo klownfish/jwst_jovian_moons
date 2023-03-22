@@ -1,8 +1,10 @@
 import numpy as np
 from alive_progress import alive_bar
 from PIL import Image, ImageDraw
-from scipy import interpolate
+import scipy.signal
+import scipy.ndimage
 import bottleneck as bn
+import math
 
 def wave2rgb(wave):
     # This is a port of javascript code from  http://stackoverflow.com/a/14917481
@@ -81,8 +83,24 @@ def data_to_rgb(data, output_path):
         for y in range(rgb_data.shape[1]):
             value = rgb_data[x, y]
             value = np.floor(value * 255)
-            print(value)
             output_img.putpixel((x, y), tuple(value.astype(int)))
+
+    (com_x, com_y) = scipy.ndimage.center_of_mass(np.median(data, axis=-1))
+    scale = 10
+    radius = 6.5
+    north_angle = 25.4 * 3.14 / 180
+    output_img = output_img.resize((output_img.width * scale, output_img.height * scale), resample=Image.Resampling.NEAREST)
+    output_img = output_img.transpose(Image.FLIP_TOP_BOTTOM)
+
+    radius *= scale
+    com_x = math.floor(scale * com_x)
+    com_y = output_img.height - math.floor(scale * com_y)
+
+
+    draw = ImageDraw.Draw(output_img)
+    draw.arc((com_x - radius, com_y - radius, com_x + radius, com_y + radius), 0, 360, fill=(255, 0, 0), width=3)
+    draw.arc((com_x - 5, com_y - 5, com_x + 5, com_y + 5), 0, 360, fill=(255, 0, 0), width = 3)
+    draw.line( ( (com_x, com_y), (com_x + math.sin(north_angle) * radius, com_y - math.cos(north_angle) * radius) ), fill=(255, 0, 0), width=3)
     output_img.save(output_path)
 
 def fits_reorder_axes(data):
@@ -105,17 +123,6 @@ def fits_reorder_axes(data):
 #                         output[x, y, z] = data[x, y, z]
 #     return output
 
-def filter_full_nan(data):
-    output = np.empty_like(data)
-    for x in range(data.shape[0]):
-        for y in range(data.shape[1]):
-            if np.nansum(data[x, y, :]) == 0:
-                output[x, y, :] = 0
-            else:
-                output[x, y, :] = data[x, y, :]
-
-    return output
-
 def get_max(data):
     test = np.nanmedian(data, axis=2)
     found_max = 0
@@ -132,12 +139,29 @@ def get_max(data):
 
 def glitch_filter(data, error):
     [_, cutoff] = np.percentile(error, [0, 90])
+    data_cutoff = np.nanmedian(data)
+
     mask = (error == 0) | (error > abs(cutoff) * 20)
     nans = np.full(data.shape, np.nan)
-    # nans[..., 0] = data[..., 0]
-    # return bn.push(np.where(mask, nans, data))
-    output = np.where(mask, nans, data)
-    output = filter_full_nan(output)
+    nans[..., 0] = data[..., 0]
+    return bn.push(np.where(mask, nans, data))
+    # output = np.where(mask, nans, data)
+    # return output
+
+def advanced_glitch_filter(data):
+    width = 60
+    output = np.empty_like(data)
+    for x in range(data.shape[0]):
+        for y in range(data.shape[1]):
+            output[x, y, :width] = np.median(data[x, y, :width])
+            for i in range(width, len(data[x, y, :])):
+                window = data[x, y, i - width: i]
+                median = np.nanmedian(window)
+                if abs(data[x, y, i]) < abs(median * 0.75) or abs(data[x, y, i]) > abs(median * 1.5):
+                    output[x, y, i] = output[x, y, i - 1]
+                else:
+                    output[x, y, i] = data[x, y, i]
+    print(output[0, 0, :])
     return output
 
 def combine_pixels(data):
@@ -157,7 +181,6 @@ def combine_pixels(data):
     return output
 
 def combine_errors(data):
-    # data = np.where(data == 0, np.nanmean(data), data)
     output = np.ndarray(shape=(1, 1, data.shape[2]))
     nans = np.full(data.shape, np.nan)
     output = np.where(data == 0, nans, data)
@@ -169,3 +192,13 @@ def single_pixel(data, x, y):
     output = np.ndarray(shape=(1,1, data.shape[2]))
     output[0, 0, :] = data[x, y, :]
     return output
+
+def decent_lowpass(data, a):
+    out = np.empty_like(data)
+    out[0] = data[0]
+    for i in range(1, len(data)):
+        if (np.isnan(data[i])):
+            out[i] = out[i - 1]
+            continue
+        out[i] = out[i - 1] * a + (1-a) * data[i]
+    return out
