@@ -6,6 +6,9 @@ import scipy.ndimage
 import bottleneck as bn
 import math
 
+RADIUS = 6.5
+NORTH_ANGLE = 25.4 * 3.14 / 180
+
 def wave2rgb(wave):
     # This is a port of javascript code from  http://stackoverflow.com/a/14917481
     gamma = 0.8
@@ -87,6 +90,40 @@ def data_to_rgb(data, output_path):
 
     (com_x, com_y) = scipy.ndimage.center_of_mass(np.median(data, axis=-1))
     scale = 10
+    radius = RADIUS
+    north_angle = NORTH_ANGLE
+    output_img = output_img.resize((output_img.width * scale, output_img.height * scale), resample=Image.Resampling.NEAREST)
+    output_img = output_img.transpose(Image.FLIP_TOP_BOTTOM)
+
+    radius *= scale
+    com_x = math.floor(scale * com_x)
+    com_y = output_img.height - math.floor(scale * com_y)
+
+
+    draw = ImageDraw.Draw(output_img)
+    draw.arc((com_x - radius, com_y - radius, com_x + radius, com_y + radius), 0, 360, fill=(255, 0, 0), width=3)
+    draw.arc((com_x - 5, com_y - 5, com_x + 5, com_y + 5), 0, 360, fill=(255, 0, 0), width = 3)
+    draw.line( ( (com_x, com_y), (com_x + math.sin(north_angle) * radius, com_y - math.cos(north_angle) * radius) ), fill=(255, 0, 0), width=3)
+    output_img.save(output_path)
+
+def data_to_grayscale(data, output_path, com):
+    img_data = data
+
+    img_data -= np.nanpercentile(data, [5,98])[0]
+    img_data /= np.nanpercentile(data, [1,98])[1]
+    img_data = np.clip(img_data, 0, 1)
+    img_data[np.isnan(img_data)] = 0
+
+    output_img = Image.new("RGB", img_data.shape[:2])
+    for x in range(img_data.shape[0]):
+        for y in range(img_data.shape[1]):
+            # print(img_data[x, y])
+            value = int(img_data[x, y] * 255)
+            value = (value, value, value)
+            output_img.putpixel((x, y), value)
+
+    (com_x, com_y) = com
+    scale = 10
     radius = 6.5
     north_angle = 25.4 * 3.14 / 180
     output_img = output_img.resize((output_img.width * scale, output_img.height * scale), resample=Image.Resampling.NEAREST)
@@ -95,7 +132,6 @@ def data_to_rgb(data, output_path):
     radius *= scale
     com_x = math.floor(scale * com_x)
     com_y = output_img.height - math.floor(scale * com_y)
-
 
     draw = ImageDraw.Draw(output_img)
     draw.arc((com_x - radius, com_y - radius, com_x + radius, com_y + radius), 0, 360, fill=(255, 0, 0), width=3)
@@ -161,7 +197,6 @@ def advanced_glitch_filter(data):
                     output[x, y, i] = output[x, y, i - 1]
                 else:
                     output[x, y, i] = data[x, y, i]
-    print(output[0, 0, :])
     return output
 
 def combine_pixels(data):
@@ -202,3 +237,8 @@ def decent_lowpass(data, a):
             continue
         out[i] = out[i - 1] * a + (1-a) * data[i]
     return out
+
+def find_freq(wavelengths, wavelength):
+    for i, v in enumerate(wavelengths):
+        if v > wavelength:
+            return i
