@@ -6,9 +6,6 @@ import scipy.ndimage
 import bottleneck as bn
 import math
 
-RADIUS = 6.5
-NORTH_ANGLE = 25.4 * 3.14 / 180
-
 def wave2rgb(wave):
     # This is a port of javascript code from  http://stackoverflow.com/a/14917481
     gamma = 0.8
@@ -59,7 +56,7 @@ def wave2rgb(wave):
     return (f(red), f(green), f(blue))
 
 
-def data_to_rgb(data, output_path):
+def data_to_rgb(data, output_path, com, radius, north_angle):
     visible_light_start = 380
     visible_light_end = 700
     rgb_data = np.ndarray(shape = [data.shape[0], data.shape[1], 3])
@@ -88,10 +85,8 @@ def data_to_rgb(data, output_path):
             value = np.floor(value * 255)
             output_img.putpixel((x, y), tuple(value.astype(int)))
 
-    (com_x, com_y) = scipy.ndimage.center_of_mass(np.median(data, axis=-1))
+    (com_x, com_y) = com
     scale = 10
-    radius = RADIUS
-    north_angle = NORTH_ANGLE
     output_img = output_img.resize((output_img.width * scale, output_img.height * scale), resample=Image.Resampling.NEAREST)
     output_img = output_img.transpose(Image.FLIP_TOP_BOTTOM)
 
@@ -106,10 +101,10 @@ def data_to_rgb(data, output_path):
     draw.line( ( (com_x, com_y), (com_x + math.sin(north_angle) * radius, com_y - math.cos(north_angle) * radius) ), fill=(255, 0, 0), width=3)
     output_img.save(output_path)
 
-def data_to_grayscale(data, output_path, com):
+def data_to_grayscale(data, output_path, com, radius, north_angle):
     img_data = data
 
-    img_data -= np.nanpercentile(data, [5,98])[0]
+    # img_data -= np.nanpercentile(data, [2,98])[0]
     img_data /= np.nanpercentile(data, [1,98])[1]
     img_data = np.clip(img_data, 0, 1)
     img_data[np.isnan(img_data)] = 0
@@ -118,14 +113,14 @@ def data_to_grayscale(data, output_path, com):
     for x in range(img_data.shape[0]):
         for y in range(img_data.shape[1]):
             # print(img_data[x, y])
-            value = int(img_data[x, y] * 255)
+            value = int(img_data[x, y] * 200)
             value = (value, value, value)
             output_img.putpixel((x, y), value)
 
     (com_x, com_y) = com
     scale = 10
-    radius = 6.5
-    north_angle = 25.4 * 3.14 / 180
+    # radius = 6.5
+    # north_angle = 25.4 * 3.14 / 180
     output_img = output_img.resize((output_img.width * scale, output_img.height * scale), resample=Image.Resampling.NEAREST)
     output_img = output_img.transpose(Image.FLIP_TOP_BOTTOM)
 
@@ -200,19 +195,9 @@ def advanced_glitch_filter(data):
     return output
 
 def combine_pixels(data):
-    energy = np.nanmean(data, axis=2)
-    mean = np.nanmean(energy)
-    good_pixels = np.empty_like(data)
-
-    for x in range(data.shape[0]):
-        for y in range(data.shape[1]):
-            if energy[x, y] < mean:
-                good_pixels[x, y, :] = np.nan
-            else:
-                good_pixels[x, y, :] = data[x, y, :]
-    output = np.ndarray(shape=(1, 1, good_pixels.shape[2]))
+    output = np.ndarray(shape=(1, 1, data.shape[2]))
     for z in range(data.shape[2]):
-        output[0, 0, z] = np.nanmean(good_pixels[:, :, z])
+        output[0, 0, z] = np.nansum(data[:, :, z])
     return output
 
 def combine_errors(data):

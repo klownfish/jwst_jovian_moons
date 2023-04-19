@@ -8,7 +8,7 @@ import argparse
 import utils.utils as utils
 import pathlib
 import scipy.ndimage
-
+from matplotlib.patches import Circle
 
 RADIUS = 6.5
 NORTH_ANGLE = 25.4 * 3.14 / 180
@@ -36,7 +36,7 @@ args = parser.parse_args()
 
 def read_hdul(hdul):
     try:
-        sci_data = np.abs(utils.fits_reorder_axes(hdul["SCI"].data))
+        sci_data = np.abs(utils.fits_reorder_axes(hdul["SCI"].data)) * hdul["SCI"].header["PIXAR_SR"]
         error_data = np.abs(utils.fits_reorder_axes(hdul["ERR"].data))
         wavelength_edges = (hdul["SCI"].header["CRVAL3"], hdul["SCI"].header["CRVAL3"] + hdul["SCI"].header["CDELT3"] * hdul["SCI"].data.shape[0])
         wavelengths = np.linspace(wavelength_edges[0], wavelength_edges[1], num=sci_data.shape[2])
@@ -81,10 +81,10 @@ if args.focus:
     for x in range(sci_data.shape[0]):
         for y in range(sci_data.shape[1]):
             dx = x - com[0]
-            dy = y - com[0]
+            dy = y - com[1]
             delta = math.floor(math.sqrt(dx * dx + dy * dy))
             if delta > RADIUS:
-                sci_data[x, y, :] = 0
+                sci_data[x, y, :] = np.nan
 
 if args.glitch:
     sci_data = utils.glitch_filter(sci_data, error_data)
@@ -117,7 +117,6 @@ if args.albedo:
         if solar_wavelengths[i] > wavelengths[0]:
             break
     minimum_length = min(len(solar_wavelengths) - solar_wave_offset, len(wavelengths))
-    print(solar_wave_offset)
     sci_data[..., 0:minimum_length] /= solar_sci_data[..., solar_wave_offset:solar_wave_offset + minimum_length]
     if args.solar:
         sci_data = solar_sci_data
@@ -155,18 +154,26 @@ if args.plot:
 
 
 if args.rgb:
-    utils.data_to_rgb(sci_data, args.rgbs)
+    utils.data_to_rgb(sci_data, args.rgb, com, RADIUS, NORTH_ANGLE)
 
 if args.snr:
-    mask = np.mean(sci_data, axis=2) < np.nanpercentile(sci_data, [80, 100])[0]
     cot = np.ndarray(shape = sci_data.shape[:2])
-    sci_data += np.mean(sci_data)
     signal = utils.find_freq(wavelengths, 4.2650)
     noise = utils.find_freq(wavelengths, 4.29)
     for x in range(sci_data.shape[0]):
         for y in range(sci_data.shape[1]):
             cot[x, y] = (sci_data[x, y, noise] - sci_data[x, y, signal]) / sci_data[x, y, noise]
-    cot  = np.where(mask, 0, cot)
-    utils.data_to_grayscale(cot, args.snr, com)
-    plt.matshow(cot, origin='lower')
+    cot = 10 * np.log10(cot)
+    # utils.data_to_grayscale(cot, args.snr, com)
+    # cot = np.log(cot)
+    fig, ax = plt.subplots()
+    plt.imshow(cot.transpose(), origin='lower', cmap="gray", vmin=np.nanpercentile(cot, 2), vmax=np.nanpercentile(cot, 99))
+    plt.title("CO₂ Band Depth")
+    cbar = plt.colorbar()
+    cbar.set_label("SNR (dB)")
+    plt.arrow(com[0], com[1], math.sin(NORTH_ANGLE) * (RADIUS - 1), math.cos(NORTH_ANGLE) * (RADIUS - 1), color="black", width=0.1)
+    circle = Circle(com, RADIUS, fill=False, edgecolor='black', linewidth=5)
+    if not args.focus:
+        ax.add_patch(circle)
+    plt.axis("off")
     plt.show()
